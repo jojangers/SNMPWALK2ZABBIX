@@ -1,0 +1,41 @@
+zabbix_export:
+  templates:
+  - description: Template built by SNMPWALK2ZABBIX script from https://github.com/Jojangers/SNMPWALK2ZABBIX
+    discovery_rules:
+    - item_prototypes:
+      - description: An index value that uniquely identifies the entry
+        key: FORTINET-FORTIMANAGER-FORTIANALYZER-MIB.fmDeviceEntIndex.1.[{#SNMPINDEX}]
+        name: fmDeviceEntIndex.1.{#SNMPINDEX}
+        snmp_oid: .1.3.6.1.4.1.12356.103.6.2.1.1.{#SNMPINDEX}
+        status: DISABLED
+        type: SNMP_AGENT
+        uuid: 30779b9cf06b4177a5143db770cba10a
+      key: FORTINET-FORTIMANAGER-FORTIANALYZER-MIB.fmDeviceEntIndex.1
+      name: fmDeviceTable
+      status: DISABLED
+      type: SNMP_AGENT
+      uuid: f2e3880b6ff14eb98154350180ca38f4
+      snmp_oid: .1.3.6.1.4.1.12356.103.6.2.1.1.1
+    groups:
+    - name: Templates
+    items:
+    - description: The number of devices in fmDeviceTable
+      key: FORTINET-FORTIMANAGER-FORTIANALYZER-MIB.fmDeviceNumber.0
+      name: fmDeviceNumber
+      snmp_oid: .1.3.6.1.4.1.12356.103.6.1.1.0
+      status: DISABLED
+      type: SNMP_AGENT
+      uuid: 2f388a3ba7fb4c049781f07664aea6ff
+      value_type: FLOAT
+    - description: The total number of VDOMS
+      key: FORTINET-FORTIMANAGER-FORTIANALYZER-MIB.fmVdomNumber.0
+      name: fmVdomNumber
+      snmp_oid: .1.3.6.1.4.1.12356.103.6.1.2.0
+      status: DISABLED
+      type: SNMP_AGENT
+      uuid: db194981791e4aa696c40840fb7607ad
+      value_type: FLOAT
+    name: template
+    template: template
+    uuid: b7722f6d329c40e4844d18933f722bb2
+  version: '6.2'
