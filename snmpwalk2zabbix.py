@@ -1,10 +1,13 @@
+#!/usr/bin/env python3
 # Copyright Sean Bradley 2022
-# Repository https://github.com/Sean-Bradley/SNMPWALK2ZABBIX
+# Copyright Jojangers 2023
+# Repository https://github.com/Jojangers/SNMPWALK2ZABBIX
 #
-# LICENSE https://github.com/Sean-Bradley/SNMPWALK2ZABBIX/blob/main/LICENSE
+# LICENSE https://github.com/Jojangers/SNMPWALK2ZABBIX/blob/main/LICENSE
 #
 # SNMPWALK2ZABBIX : Create a Zabbix template from an SNMPWALK response.
 # Copyright (C) 2022 Sean Bradley
+# Copyright (C) 2023 Jojangers
 #
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published
@@ -18,283 +21,423 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
-import sys
 import os
 import re
 import uuid
 
-if len(sys.argv) < 3:
-    print(
-        "Usage: python snmpwalk2zabbix.py \x1B[3mCommunity\x1B[23m \x1B[3mIP-Address\x1B[23m \x1B[3mBase-OID\x1B[23m\neg,\npython snmpwalk2zabbix.py public 127.0.0.1 1.3.6.1.2.1.1")
-else:
-    COMMUNITY = sys.argv[1]
-    IP = sys.argv[2]
-    BASE_OID = sys.argv[3] if len(sys.argv) == 4 else "."
 
-    OIDSRESPONSE = os.popen('snmpwalk -v 2c -On -c ' +
-                            COMMUNITY + ' ' + IP + ' ' + BASE_OID).read()
-    # MIBSRESPONSE = os.popen('snmpwalk -v 2c -OX -c ' +
-    #                        COMMUNITY + ' ' + IP + ' ' + BASE_OID).read()
+###########
+# LOGGING #
+###########
+# TODO: add to function.
 
-    OIDS = OIDSRESPONSE.split("\n")
+def setup_logger(loglevel):
+    logformatter = logging.Formatter('%(asctime)s %(levelname)s [%(name)s] %(message)s')
+    filehandler = logging.FileHandler("debug/debug.log")
+    filehandler.setFormatter(logformatter)
+    consolehandler = logging.StreamHandler()
+    consolehandler.setFormatter(logformatter)
+    loglevel = loglevel.upper()
+    rootlogger = logging.getLogger(__name__)
+    rootlogger.addHandler(filehandler)
+    rootlogger.addHandler(consolehandler)
+    rootlogger.setLevel(loglevel)
+    return rootlogger
 
-    print("Processing " + str(len(OIDS)) + " rows")
+############
+# ARGPARSE #
+############
 
-    DATATYPES = {
-        "STRING": "CHAR",
-        "OID": "CHAR",
-        "TIMETICKS": "",
-        "BITS": "TEXT",
-        "COUNTER": "",
-        "COUNTER32": "",
-        "COUNTER64": "",
-        "GAUGE": "",
-        "GAUGE32": "",
-        "INTEGER": "FLOAT",
-        "INTEGER32": "FLOAT",
-        "IPADDR": "TEXT",
-        "IPADDRESS": "TEXT",
-        "NETADDDR": "TEXT",
-        "NOTIF": "",  # SNMP Trap
-        "TRAP": "",  # SNMP Trap
-        "OBJECTID": "TEXT",
-        "OCTETSTR": "TEXT",
-        "OPAQUE": "TEXT",
-        "TICKS": "",
-        "UNSIGNED32": "",
-        "WRONG TYPE (SHOULD BE GAUGE32 OR UNSIGNED32)": "TEXT",
-        "\"\"": "TEXT",
-        "HEX-STRING": "TEXT",
-    }
+def setup_arguments():
+    parser = argparse.ArgumentParser(description="python script for making zabbix template from snmpwalk output.")
+    parser.add_argument("-c", "--community", default="public", type=str, help="snmp v2c community string")
+    parser.add_argument("host", help="hostname or ip address to perform snmpwalk on", type=str)
+    parser.add_argument("oid", default=".", help="base OID to perform snmpwalk on.", type=str)
+    parser.add_argument("-o", "--output", default="template.xml", help="destination filename")
+    args = parser.parse_args()
+    return args
 
-    def getDataType(s):
-        dataType = "TEXT"
-        if s in DATATYPES:
-            dataType = DATATYPES[s]
 
-            if s == "NOTIF" or s == "TRAP":
-                print("TODO: handle traps")
+
+#########
+# CLASS #
+#########
+
+class snmpwalk2zabbix():
+    def __init__(self):
+        import logging
+        """
+        instance containing the data for creating a full template
+        
+
+        Args:
+            host (_type_): _description_
+            community (_type_): _description_
+        """
+        # TODO: add snmpv3 support
+        # replace community with version and use a seperate class function to set auth?
+        #self.host = host
+        #self.community = community
+        self.logging = logging.getLogger(__name__)
+        self.discovery_rules = {}
+        self.items = []
+        self.valuemaps = {}
+        
+    ###################
+    # TEMPLATE EXPORT #
+    ###################
+    
+    """
+    # TODO: create function to upload to zabbix
+    def upload_to_zabbix(self, template_name="template", zbx_api_url, zbx_uname, zbx_api_token):
+        import zapi
+    """    
+        
+        
+    def create_yaml_template_file(self, template_name="template", filename="template.yaml"):
+        
+        try:
+            import yaml
+        except ImportError:
+            self.logging.error("you need to install yaml for python via pip install pyyaml")
+            return
+        # TODO: add options to add to host groups
+        description = 'Template built by SNMPWALK2ZABBIX script from https://github.com/Jojangers/SNMPWALK2ZABBIX'
+        export_dict = {"zabbix_export":{"version": '6.2',"templates": []}}
+        template = {
+            "uuid": uuid.uuid4().hex,
+            "template": template_name,
+            "name": template_name,
+            "description": description,
+            "groups": [{"name": "Templates"}],
+            "discovery_rules": []
+        }
+        if len(self.items):
+            template['items'] = self.items
+            
+        if len(self.discovery_rules):
+            for i in self.discovery_rules:
+                template['discovery_rules'].append(self.discovery_rules[i])
+            
+        if len(self.valuemaps):
+            template['valuemaps'].append(self.valuemaps)
+        
+        export_dict["zabbix_export"]["templates"].append(template)
+        # TODO: add filepath validation.
+        # TODO: add check to ensure filename ends in ".yaml"
+        with open(filename, 'w') as stream:
+            yaml.dump(export_dict, stream)
+        self.logging.info('finished writing template to: %s', filename)
+            
+        
+            
+    
+    #################
+    # TEMPLATE READ #
+    #################
+
+    def cli_walk_from_oid(self, host, base_oid, community="public"):
+        """
+        performs snmpwalk on the specified oid and adds any oids found
+        to the instance.
+
+        Args:
+            base_oid (str): base oid to query with snmpwalk.
+        """
+        oid_list = self.__get_oid_list_from_snmpwalk(host, community, base_oid)
+        for i, oid in enumerate(oid_list):
+            self.logging.debug("processing OID=%s", oid)
+            
+            oid_kvp = self.__get_oid_kvp(oid)
+            if oid_kvp is not None:
+                self.logging.debug(f"oid string: {oid_kvp[0]}, zabbix datatype: {oid_kvp[1]}, oid value: {oid_kvp[2]}")
+                oid_dict = self.__parse_oidstring(oid_kvp[0])
+                # create item prototype
+                if oid_dict["IsTable"]:
+                    self.__add_discovery(oid_dict, oid_kvp[1])
+                # create normal item
+                elif not oid_dict["IsTable"]:
+                    self.__add_item(oid_dict, oid_kvp[1])
+        return oid_list
+    """
+    def read_from_file(self, filename):
+        # TODO: add function to read snmpwalk from filename
+    """
+    
+    """
+    def read_from_mib(self, mibpath, baseoid):
+        # TODO: add function to read and parse mib file directly.
+    """
+    
+            
+    ######################
+    # INTERNAL FUNCTIONS #
+    ######################
+    
+    def __add_item(self, oid_dict, data_type="NUMERIC"):
+        # TODO: add default values for refresh delay.
+        name = oid_dict["Name"]
+        description = oid_dict["Description"]
+        key = oid_dict["Key"]
+        oid = oid_dict["Full_oid"]
+        
+        item = {"name": name, 
+                "uuid": uuid.uuid4().hex,
+                "type": "SNMP_AGENT",
+                "snmp_oid": oid,
+                "key": key,
+                "status": "DISABLED",
+                "value_type": data_type,
+                "description": description
+                }
+        self.items.append(item)
+        self.logging.info(f"ITEM -> {name} -> {data_type}")
+        return item
+        
+    def __add_discovery(self, oid_dict, data_type="NUMERIC"):
+        # just to make code more readable.
+        end_oid = oid_dict["end_oid"]
+        key = oid_dict["Key"]
+        trimmed_oid = oid_dict["Trimmed_oid"]
+        discovery_name = oid_dict["Discovery_rule"]
+        prototype_name = oid_dict["Name"]
+        description = oid_dict["Description"]
+        
+        if not discovery_name in self.discovery_rules:
+            # add discovery rule
+            Full_oid = oid_dict["Full_oid"]
+            self.discovery_rules[discovery_name] = {"type": "SNMP_AGENT",
+                                                    "status": "DISABLED",
+                                                    "name": discovery_name,
+                                                    "uuid": uuid.uuid4().hex,
+                                                    "key": key,
+                                                    "snmp_oid": Full_oid,
+                                                    "item_prototypes": []
+                }
+            self.logging.debug("discovery rule: %s", self.discovery_rules[discovery_name])
+            self.current_item = ""
+            
+        if end_oid != self.current_item:
+            # append prototype items.
+            self.current_item = end_oid
+            #item_prototype = [end_oid, mib, key, trimmed_oid, data_type, description]
+            item_prototype = {"name": prototype_name + """.[{#SNMPINDEX}]""",
+                              "uuid": uuid.uuid4().hex,
+                              "type": "SNMP_AGENT",
+                              "status": "DISABLED",
+                              "snmp_oid": trimmed_oid + """.{#SNMPINDEX}""",
+                              "key": key + """.{#SNMPINDEX}""",
+                              "description": description
+                              }
+            self.logging.debug("item prototype: %s", item_prototype)
+            self.discovery_rules[discovery_name]["item_prototypes"].append(item_prototype)
+            self.logging.info(f"Item prototype -> {prototype_name} -> {end_oid} ({data_type}) ")
+            return item_prototype
         else:
-            print("Unhandled data type [" + s + "] so assigning TEXT")
-        if len(dataType) > 0:  # if data type is INTEGER or other unsigned int, then don't create the node since zabbix will assign it the default which is already unsigned int
-            return dataType
+            self.logging.debug("item already added, skipping: %s", end_oid)
+            return
+        
+
+    """
+    def __add_valuemaps(self):
+        name = "something"
+        mappings = "something2"
+        # TODO: add reading and adding of valuemaps from mib. 
+        self.logging.error("Valuemap function not added yet.") 
+        valuemap = {"name" : "<++>",
+                    "uuid" : uuid.uuid4().hex,
+                    "mappings" : {} 
+            }
+    """
+        
+    def __get_oid_list_from_snmpwalk(self, host, community, base_oid):
+        """
+        runs snmpwalk on self.host, splits the result and returns a list.
+
+        Args:
+            host (str): ip or hostname of the target host.
+            community (str): snmpv2 community string.
+            base_oid (str): string containing the base oid to parse with snmpwalk
+
+        Returns:
+            OID_LIST: list of the OIDs and their values.
+        """        
+        self.logging.info("running snmpwalk")
+        # TODO: add more error checking
+        # - if response is a valid list of oids
+        # - is hostname reachable on community?
+        response = os.popen('snmpwalk -v 2c -On -c ' +community + ' ' + host + ' ' + base_oid).read()
+        self.logging.debug("got response: %s", response)
+        OID_LIST = response.split("\n")
+        self.logging.info("Processing %s rows", str(len(OID_LIST)))
+        return OID_LIST
+
+        
+    
+    @staticmethod
+    def __parse_oidstring(oidstring):
+        oid_dict = {}
+        """
+        translates the oid string and returns a dictionary
+        containing the mibstring, item description and full oid path.
+
+        Args:
+            oidstring (string): full numerical oid path
+
+        Returns:
+            oid_dict: dictionary containing the info
+                MIB (str): mibstring (last part of the mib path)
+                Description (str): Description of the oid value
+                fullOidStringParts (list): full oid path in parts.
+                Discovery (Bool): True if OID is in a table.
+        """        
+        # TODO: add checking to see if this succeds.
+        # TODO: find better way to do this without os.popen
+        fullOidString = os.popen('snmptranslate -Of ' + oidstring).read().strip()
+        description = os.popen('snmptranslate -Td ' + oidstring).read()
+        mibstring = os.popen('snmptranslate -Tz ' + oidstring).read()
+        mib = mibstring.strip()
+        # remove the last identifier on the oid string.
+        trimmed_oid = oidstring.split(".")[:-1]
+        trimmed_oid = ".".join(trimmed_oid)
+        
+        # TODO: add better error checking
+        # TODO: validate description is actually translate.
+        if description is not None:
+            groups = re.search(r'DESCRIPTION.*("[^"]*")', description)
+            if groups.group(1) is not None:
+                description = groups.group(1)
+                description = description.replace('"', '')
+                description = description.replace('\\n', '&#13;')
+                description = description.replace('<', '&lt;')
+                description = description.replace('>', '&gt;')
+                Description = re.sub(r"\s\s+", " ", description)
+
+        
+        if fullOidString is not None:
+            fullOidStringParts = fullOidString.split(".")
+            # remove the last id part of the OID
+            # TODO: add support for ipv4 oid identifiers.
+            if fullOidStringParts[-1].isdigit():
+                fullOidStringParts.pop(-1)
+            if fullOidStringParts[-3].upper().endswith("TABLE"):
+                IsTable = True
+                Discovery_rule = fullOidStringParts[-3]
+            else:
+                IsTable = False
+                Discovery_rule = None
+            
+            Name = mib.split("::")[1]
+            Name = Name.split(".")[0]
+            
+            key = mib.split(".")[:-1]
+            key = ".".join(key)
+            key = key.replace("::", ".")
+            
+
+        end_oid = fullOidStringParts[-1]
+            
+        oid_dict = {
+            "Name" : Name,
+            "IsTable": IsTable,
+            "Description" : Description,
+            "Key" : key,
+            "end_oid": end_oid,
+            "fullOidStringParts" : fullOidStringParts,
+            "Trimmed_oid" : trimmed_oid,
+            "Full_oid" : oidstring,
+            "Discovery_rule": Discovery_rule
+        }
+        return oid_dict
+
+
+    @staticmethod
+    def __get_oid_kvp(snmpwalk_row):
+        """
+        checks the snmpwalk response row and returns ordered array
+        containing the oid string, zabbix item datatype and the
+        result value.
+
+        Args:
+            oid (str): full snmpwalk response row.
+
+        Returns:
+            oid_kvp: array split into oid string and oid result value.
+                [0] = oid string
+                [1] = zabbix item datatype
+                [2] = result value (previously named "value")
+        """
+        zabbix_datatypes = {
+            "DEFAULT": "TEXT",
+            "STRING": "CHAR",
+            "OID": "CHAR",
+            "TIMETICKS": "UNSIGNED",
+            "BITS": "TEXT",
+            "COUNTER": "UNSIGNED",
+            "COUNTER32": "UNSIGNED",
+            "COUNTER64": "UNSIGNED",
+            "GAUGE": "UNSIGNED",
+            "GAUGE32": "UNSIGNED",
+            "INTEGER": "FLOAT",
+            "INTEGER32": "FLOAT",
+            "IPADDR": "TEXT",
+            "IPADDRESS": "TEXT",
+            "NETADDDR": "TEXT",
+            "NOTIF": "",  # SNMP Trap
+            "TRAP": "",  # SNMP Trap
+            "OBJECTID": "TEXT",
+            "OCTETSTR": "TEXT",
+            "OPAQUE": "TEXT",
+            "TICKS": "UNSIGNED",
+            "UNSIGNED32": "UNSIGNED",
+            "WRONG TYPE (SHOULD BE GAUGE32 OR UNSIGNED32)": "TEXT",
+            "\"\"": "TEXT",
+            "HEX-STRING": "TEXT",
+        }
+        
+        if len(snmpwalk_row) > 0 and not "NO MORE VARIABLES LEFT" in snmpwalk_row.upper():
+            oid_kvp = snmpwalk_row.split("=")
+            oid_kvp[0] = oid_kvp[0].strip()
+            kvp_split = oid_kvp[1].split(":")
+            if kvp_split[0]:
+                zabbix_datatype = kvp_split[0].strip().upper()
+            if kvp_split[1]:
+                oid_kvp.append(kvp_split[1].strip())
+            
+            
+            # self.mib = oid_kvp
+            if zabbix_datatype in zabbix_datatypes:
+                oid_kvp[1] = zabbix_datatypes[zabbix_datatype]
+                
+                # TODO: handle traps
+                if zabbix_datatype == "NOTIF" or zabbix_datatype == "TRAP":
+                    oid_kvp[1] = zabbix_datatypes["DEFAULT"]
+                
+            else:
+                oid_kvp[1] = zabbix_datatypes["DEFAULT"]
+            
+            return oid_kvp
+            # oid_kvp[0] = oid string
+            # oid_kvp[1] = zabbix interface value
+            # oid_kvp[2] = oid value
         else:
             return None
+    
+##########
+# SCRIPT #
+##########
+def main(args, logger):
+    snmptemplate = snmpwalk2zabbix()
+    #snmptemplate.cli_walk_from_oid(host=args.host, community=args.community, base_oid=args.oid)
+    snmptemplate.pysnmp_walk_from_oid(host=args.host, community=args.community, base_oid=args.oid)
+    snmptemplate.create_yaml_template_file(filename="template.yaml")
 
-    ITEMS = []
-    # ENUMS = {}
-    # LAST_ENUM_NAME = ""  # the one that is being built now
-    DISCOVERY_RULES = {}
-    LAST_PART_10 = ""  # so that no duplcate table rows are re added
-    TEMPLATE_NAME = "my template"
 
-    for i, oid in enumerate(OIDS):
-        if len(oid) > 0:  # and i < 7:
-            #print(str(i) + " " + str(len(OIDS)) + " " + str(len(oid)))
-            if not "NO MORE VARIABLES LEFT" in oid.upper():
-                oid_kvp = oid.split("=")
-                mib = oid_kvp  # set it to the OID in case MIB version can't be found
-                if len(oid_kvp) > 1:  # and i != len(OIDS) - 1:
-                    data_type = getDataType(
-                        oid_kvp[1].split(":")[0].strip().upper())
-
-                    if len(oid_kvp[1]) > 3:
-                        value = oid_kvp[1].split(":")[1].strip()
-
-                        if oid_kvp[0].strip() == ".1.3.6.1.2.1.1.5.0":
-                            TEMPLATE_NAME = value
-
-                        fullOidString = os.popen(
-                            'snmptranslate -Of ' + oid_kvp[0].strip()).read()
-                        if fullOidString is not None:
-                            fullOidStringParts = fullOidString.split(".")
-
-                        # restricts to only add tables and simple items
-                        if len(fullOidStringParts) < 13:
-
-                            mibString = os.popen(
-                                'snmptranslate -Tz ' + oid_kvp[0].strip()).read()
-                            if mibString is not None:
-                                mib = mibString.strip()
-
-                            description = os.popen(
-                                'snmptranslate -Td ' + oid_kvp[0].strip()).read()
-                            if description is not None:
-                                groups = re.search(
-                                    r'DESCRIPTION.*("[^"]*")', description)
-                                if groups is not None:
-                                    if groups.group(1) is not None:
-                                        description = groups.group(1)
-                                        description = description.replace(
-                                            '"', '')
-                                        description = description.replace(
-                                            '\\n', '&#13;')
-                                        description = description.replace(
-                                            '<', '&lt;')
-                                        description = description.replace(
-                                            '>', '&gt;')
-                                        description = re.sub(
-                                            r"\s\s+", " ", description)
-                                        # print(description)
-
-                            #print(oid_kvp[0].strip() + ", " + mib + ", " + value)
-
-                            if fullOidStringParts[8].upper().endswith("TABLE"):
-                                # table = os.popen('snmptable -v 2c -c ' +
-                                #     COMMUNITY + ' ' + IP + ' ' + fullOidStringParts[8]).read()
-                                # print(table)
-                                # exit()
-
-                                name = mib.split("::")[0] + \
-                                    "::" + fullOidStringParts[8]
-                                #name = fullOidStringParts[8]
-                                key = mib.replace("::", ".")
-                                #print(fullOidStringParts[8] + " " + fullOidStringParts[9] + " " + fullOidStringParts[10])
-                                if not name in DISCOVERY_RULES:
-                                    DISCOVERY_RULES[name] = []
-                                    LAST_PART_10 = ""
-
-                                if LAST_PART_10 != fullOidStringParts[10]:
-                                    trimmed_oid = oid_kvp[0].strip()
-                                    trimmed_oid = trimmed_oid.split(".")[:-1]
-                                    trimmed_oid = ".".join(trimmed_oid)
-                                    # print(oid_kvp[0].strip())
-                                    # print(trimmed_oid)
-                                    # exit()
-                                    item_protoype = [
-                                        fullOidStringParts[10], mib, key, trimmed_oid, data_type, description]
-                                    LAST_PART_10 = fullOidStringParts[10]
-                                    # print(name)
-                                    # print(discovery_rule)
-                                    # exit()
-                                    DISCOVERY_RULES[name].append(item_protoype)
-                                    print("ITEM_PROTOTYPE -> " + name + " -> " + fullOidStringParts[10] + " (" + (
-                                        "NUMERIC" if data_type is None else data_type) + ")")
-                            else:
-                                name = mib.split("::")[1]
-                                name = name.split(".")[0]
-                                key = mib.replace("::", ".")
-                                item = [name, mib, key, oid_kvp[0].strip(),
-                                        data_type, description]
-                                ITEMS.append(item)
-                                print("ITEM -> " + mib + " -> " + name + " (" +
-                                      ("NUMERIC" if data_type is None else data_type) + ")")
-
-    xml = """<?xml version=\"1.0\" encoding=\"UTF-8\"?>
-<zabbix_export>
-    <version>6.0</version>
-    <templates>
-        <template>
-            <uuid>""" + uuid.uuid4().hex + """</uuid>
-            <template>""" + TEMPLATE_NAME + """ SNMP</template>
-            <name>""" + TEMPLATE_NAME + """ SNMP</name>
-            <description>Template built by SNMPWALK2ZABBIX script from https://github.com/Sean-Bradley/SNMPWALK2ZABBIX</description>
-            <groups>
-                <group>
-                    <name>Templates</name>
-                </group>
-            </groups>
-            <items>"""
-
-    # ITEMS
-    for item in ITEMS:
-        # print(item)
-        xml += """                  
-                <item>
-                    <uuid>""" + uuid.uuid4().hex + """</uuid>
-                    <name>""" + item[0] + """</name>
-                    <type>SNMP_AGENT</type>
-                    <snmp_oid>""" + item[3] + """</snmp_oid>
-                    <key>""" + item[2] + """</key>"""
-        if item[4] is not None:
-            xml += """                    
-                    <value_type>""" + item[4] + """</value_type>"""
-        xml += """
-                    <description>""" + item[5] + """</description>
-                    <history>7d</history>
-                    <trends>0</trends>
-                    <status>DISABLED</status>
-                </item>"""
-    if len(ITEMS):
-        xml += """
-            </items>"""
-
-    # Discovery rules and item prototypes
-    if len(DISCOVERY_RULES):
-        xml += """
-            <discovery_rules>"""
-        for discovery_rule in DISCOVERY_RULES:
-            # print(DISCOVERY_RULES[discovery_rule])
-            SNMPOIDS = ""
-            xml += """
-                <discovery_rule>
-                    <uuid>""" + uuid.uuid4().hex + """</uuid>
-                    <name>""" + discovery_rule.split("::")[1] + """</name>
-                    <delay>3600</delay>
-                    <key>""" + discovery_rule.replace("::", ".") + """</key>
-                    <status>DISABLED</status>
-                    <type>SNMP_AGENT</type>
-                    <item_prototypes>"""
-
-            for item_protoype in DISCOVERY_RULES[discovery_rule]:
-                # print(item_protoype)
-                xml += """
-                        <item_prototype>
-                            <uuid>""" + uuid.uuid4().hex + """</uuid>
-                            <name>""" + item_protoype[0] + """.{#SNMPINDEX}</name>
-                            <type>SNMP_AGENT</type>
-                            <snmp_oid>""" + item_protoype[3] + """.{#SNMPINDEX}</snmp_oid>
-                            <key>""" + item_protoype[3] + """.[{#SNMPINDEX}]</key>"""
-                if item_protoype[4] is not None:
-                    xml += """                    
-                            <value_type>""" + item_protoype[4] + """</value_type>"""
-                xml += """
-                            <delay>1h</delay>
-                            <history>7d</history>
-                            <description>""" + item_protoype[5] + """</description>                           
-                        </item_prototype>"""
-
-                SNMPOID2APPEND = "{#" + \
-                    item_protoype[0].upper() + "}," + item_protoype[3] + ","
-                if(len(SNMPOIDS + SNMPOID2APPEND) < 501):
-                    SNMPOIDS += SNMPOID2APPEND
-
-            xml += """                        
-                    </item_prototypes>
-                    <snmp_oid>discovery[""" + SNMPOIDS[:-1] + """]</snmp_oid>"""
-            xml += """
-                </discovery_rule>"""
-
-        xml += """
-            </discovery_rules>"""
-
-    # #ENUMS
-    # if len(ENUMS):
-    #     xml += """
-    #         <value_maps>"""
-    #     for x in ENUMS:
-    #         xml += """
-    #             <value_map>
-    #                 <name>""" + x + """</name>
-    #                 <mappings>"""
-    #         for y in ENUMS[x]:
-    #             xml += """
-    #                     <mapping>
-    #                         <newvalue>""" + y[0] + """</newvalue>
-    #                         <value>""" + y[1] + """</value>
-    #                     </mapping>"""
-    #         xml += """
-    #                 </mappings>
-    #             </value_map>"""
-    #     xml += """
-    #         </value_maps>"""
-
-    xml += """
-        </template>
-    </templates>
-</zabbix_export>"""
-
-    with open("template-" + TEMPLATE_NAME.replace(" ", "-") + ".xml", "w") as xml_file:
-        xml_file.write(xml)
-
-    print("Done")
+if __name__ == "__main__":
+    import logging
+    import argparse
+    # setup args and logger if run as a script.
+    loglevel = "info"
+    args = setup_arguments()
+    logger = setup_logger(loglevel)
+    main(args, logger)
